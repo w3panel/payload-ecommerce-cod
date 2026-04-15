@@ -82,7 +82,7 @@ jobs:
           body: |
             ## Release v${{ steps.version.outputs.version }}
             
-            See [CHANGELOG.md](https://github.com/technewwings/payload-ecommerce-cod/blob/main/CHANGELOG.md) for details.
+            See [CHANGELOG.md](https://github.com/w3panel/payload-ecommerce-cod/blob/main/CHANGELOG.md) for details.
             
             ## Installation
             ```bash

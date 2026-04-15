@@ -45,12 +45,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/technewwings/payload-ecommerce-cod.git"
+    "url": "git+https://github.com/w3panel/payload-ecommerce-cod.git"
   },
   "bugs": {
-    "url": "https://github.com/technewwings/payload-ecommerce-cod/issues"
+    "url": "https://github.com/w3panel/payload-ecommerce-cod/issues"
   },
-  "homepage": "https://github.com/technewwings/payload-ecommerce-cod#readme",
+  "homepage": "https://github.com/w3panel/payload-ecommerce-cod#readme",
   "author": "wtree",
   "license": "MIT",
   "engines": {

@@ -28,4 +28,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Actions CI/CD pipeline
 - Documentation and examples
 
-[1.0.0]: https://github.com/technewwings/payload-ecommerce-cod/releases/tag/v1.0.0
+[1.0.0]: https://github.com/w3panel/payload-ecommerce-cod/releases/tag/v1.0.0

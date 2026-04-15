@@ -1,8 +1,8 @@
 # @wtree/payload-ecommerce-cod
 
 [![npm version](https://badge.fury.io/js/@wtree%2Fpayload-ecommerce-cod.svg)](https://www.npmjs.com/package/@wtree/payload-ecommerce-cod)
-[![CI](https://github.com/technewwings/payload-ecommerce-cod/actions/workflows/ci.yml/badge.svg)](https://github.com/technewwings/payload-ecommerce-cod/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/technewwings/payload-ecommerce-cod/branch/main/graph/badge.svg)](https://codecov.io/gh/technewwings/payload-ecommerce-cod)
+[![CI](https://github.com/w3panel/payload-ecommerce-cod/actions/workflows/ci.yml/badge.svg)](https://github.com/w3panel/payload-ecommerce-cod/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/w3panel/payload-ecommerce-cod/branch/main/graph/badge.svg)](https://codecov.io/gh/w3panel/payload-ecommerce-cod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Cash on Delivery (COD) payment adapter for Payload CMS Ecommerce Plugin. This adapter follows the same structure as the official Stripe adapter and integrates seamlessly with Payload's ecommerce plugin.
@@ -381,7 +381,7 @@ To enable automated publishing, add the following secrets to your GitHub reposit
    - Add to: Repository Settings → Secrets → Actions
 
 2. **CODECOV_TOKEN** (optional): For coverage reporting
-   - Generate at: https://codecov.io/gh/technewwings/payload-ecommerce-cod
+   - Generate at: https://codecov.io/gh/w3panel/payload-ecommerce-cod
    - Add to: Repository Settings → Secrets → Actions
 
 ## Comparison with Stripe Adapter
@@ -467,9 +467,9 @@ MIT - See [LICENSE](LICENSE) for details.
 ## Support
 
 For issues and questions:
-- 🐛 [Report a bug](https://github.com/technewwings/payload-ecommerce-cod/issues)
-- 💬 [Start a discussion](https://github.com/technewwings/payload-ecommerce-cod/discussions)
-- 📖 [Read the docs](https://github.com/technewwings/payload-ecommerce-cod#readme)
+- 🐛 [Report a bug](https://github.com/w3panel/payload-ecommerce-cod/issues)
+- 💬 [Start a discussion](https://github.com/w3panel/payload-ecommerce-cod/discussions)
+- 📖 [Read the docs](https://github.com/w3panel/payload-ecommerce-cod#readme)
 
 ## Changelog
 
