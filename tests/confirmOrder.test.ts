@@ -88,6 +88,20 @@ describe('confirmOrder', () => {
     })
 
     expect(mockPayload.update).toHaveBeenCalledTimes(2)
+
+    const transactionUpdate = mockPayload.update.mock.calls.find(
+      (call) => (call[0] as { collection?: string }).collection === 'transactions',
+    )
+    expect(transactionUpdate).toBeDefined()
+    expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).toEqual(
+      expect.objectContaining({
+        order: 'order-123',
+        cod: expect.objectContaining({ validationStatus: 'validated' }),
+      }),
+    )
+    expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).not.toHaveProperty(
+      'status',
+    )
   })
 
   it('should throw error if orderID is missing', async () => {

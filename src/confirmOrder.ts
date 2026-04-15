@@ -87,13 +87,12 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
         },
       })
 
-      // Update the transaction with the order ID and mark as validated
+      // Link the order; transaction payment status stays pending until cash is collected.
       await payload.update({
         id: transaction.id,
         collection: transactionsSlug,
         data: {
           order: order.id,
-          status: 'succeeded',
           cod: {
             ...((transaction as Record<string, unknown>).cod || {}),
             validationStatus: 'validated',

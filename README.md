@@ -407,11 +407,11 @@ The adapter correctly implements the `PaymentAdapter` interface with:
    - Calculates service charges (percentage and/or fixed)
    - Generates unique COD order ID
 
-2. **confirmOrder**: Completes the payment flow:
+2. **confirmOrder**: Completes the checkout flow:
    - Verifies existing transaction by COD order ID
    - Creates order with cart items and addresses
    - Updates cart as purchased
-   - Updates transaction status to 'succeeded'
+   - Links the order on the transaction and sets `cod.validationStatus` to validated; **transaction `status` stays `pending`** until cash is collected (set `status` to `succeeded` via admin, hooks, or when you mark `cod.paymentCollected`)
    - Returns order and transaction IDs
 
 3. **Transaction Fields**:
