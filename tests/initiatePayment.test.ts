@@ -73,6 +73,23 @@ describe('initiatePayment', () => {
     )
   })
 
+  it('should not copy cart line item ids into transaction items', async () => {
+    const handler = initiatePayment({})
+    await handler({
+      data: baseData,
+      req: mockReq,
+      transactionsSlug: 'transactions',
+    })
+
+    const createCall = mockPayload.create.mock.calls[0]?.[0] as {
+      data?: { items?: Array<Record<string, unknown>> }
+    }
+    expect(createCall?.data?.items).toEqual([{ product: 'product-123', quantity: 2 }])
+    for (const item of createCall?.data?.items ?? []) {
+      expect(item).not.toHaveProperty('id')
+    }
+  })
+
   it('should throw error if currency is missing', async () => {
     const handler = initiatePayment({})
     const dataWithoutCurrency = { ...baseData, currency: '' }

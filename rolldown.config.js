@@ -1,4 +1,4 @@
-import { defineConfig } from 'rolldown';
+import { defineConfig } from 'rolldown'
 
 export default defineConfig({
   input: 'src/index.ts',
@@ -6,14 +6,14 @@ export default defineConfig({
     {
       format: 'cjs',
       entryFileNames: '[name].js',
-      dir: 'dist'
+      dir: 'dist',
     },
     {
       format: 'esm',
       entryFileNames: '[name].mjs',
-      dir: 'dist'
-    }
+      dir: 'dist',
+    },
   ],
   external: ['payload'],
-  treeshake: true
-});
+  treeshake: true,
+})

@@ -91,7 +91,7 @@ export const initiatePayment: (props: Props) => NonNullable<PaymentAdapter>['ini
 
       const totalAmount = amount + serviceCharge
 
-      // Flatten cart items to store IDs only
+      // Flatten cart items to store IDs only (omit cart line `id` — transactions_items.id is globally unique)
       const flattenedCart = cart.items.map((item) => {
         const productID = typeof item.product === 'object' ? item.product.id : item.product
         const variantID = item.variant
@@ -100,12 +100,14 @@ export const initiatePayment: (props: Props) => NonNullable<PaymentAdapter>['ini
             : item.variant
           : undefined
 
-        const { product: _product, variant: _variant, ...customProperties } = item
+        const quantity =
+          typeof item.quantity === 'number' && Number.isFinite(item.quantity) && item.quantity > 0
+            ? item.quantity
+            : 1
 
         return {
-          ...customProperties,
           product: productID,
-          quantity: item.quantity,
+          quantity,
           ...(variantID ? { variant: variantID } : {}),
         }
       })
