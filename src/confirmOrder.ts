@@ -12,12 +12,7 @@ type Props = {
 
 export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confirmOrder'] =
   (_props) =>
-  async ({
-    data,
-    finalizeOrder,
-    req,
-    transactionsSlug = 'transactions',
-  }) => {
+  async ({ data, finalizeOrder, req, transactionsSlug = 'transactions' }) => {
     const payload = req.payload
 
     const customerEmail = data.customerEmail
