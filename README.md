@@ -85,21 +85,21 @@ function App() {
 
 ### Server-side Options
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `label` | `string` | Display label for the payment method (default: "Cash on Delivery") |
-| `minimumOrder` | `number` | Minimum order amount in smallest currency unit (e.g., cents) |
-| `maximumOrder` | `number` | Maximum order amount in smallest currency unit |
-| `allowedRegions` | `string[]` | Array of ISO 3166-1 alpha-2 country codes where COD is available |
-| `supportedCurrencies` | `string[]` | Array of ISO 4217 currency codes supported for COD |
-| `serviceChargePercentage` | `number` | Percentage service charge to add to orders |
-| `fixedServiceCharge` | `number` | Fixed service charge in smallest currency unit |
-| `groupOverrides` | `object` | Override default transaction fields |
+| Option                    | Type       | Description                                                        |
+| ------------------------- | ---------- | ------------------------------------------------------------------ |
+| `label`                   | `string`   | Display label for the payment method (default: "Cash on Delivery") |
+| `minimumOrder`            | `number`   | Minimum order amount in smallest currency unit (e.g., cents)       |
+| `maximumOrder`            | `number`   | Maximum order amount in smallest currency unit                     |
+| `allowedRegions`          | `string[]` | Array of ISO 3166-1 alpha-2 country codes where COD is available   |
+| `supportedCurrencies`     | `string[]` | Array of ISO 4217 currency codes supported for COD                 |
+| `serviceChargePercentage` | `number`   | Percentage service charge to add to orders                         |
+| `fixedServiceCharge`      | `number`   | Fixed service charge in smallest currency unit                     |
+| `groupOverrides`          | `object`   | Override default transaction fields                                |
 
 ### Client-side Options
 
-| Option | Type | Description |
-|--------|------|-------------|
+| Option  | Type     | Description                                                        |
+| ------- | -------- | ------------------------------------------------------------------ |
 | `label` | `string` | Display label for the payment method (default: "Cash on Delivery") |
 
 ## Transaction Fields
@@ -442,7 +442,7 @@ The adapter provides a client-compatible implementation with:
 All exports are properly typed:
 
 ```typescript
-export type CODAdapterArgs = { /* configuration options */ }
+export type CODAdapterArgs = {/* configuration options */}
 export type CODAdapterClientArgs = PaymentAdapterClientArgs
 export type InitiatePaymentReturnType = {
   message: string
@@ -467,6 +467,7 @@ MIT - See [LICENSE](LICENSE) for details.
 ## Support
 
 For issues and questions:
+
 - 🐛 [Report a bug](https://github.com/w3panel/payload-ecommerce-cod/issues)
 - 💬 [Start a discussion](https://github.com/w3panel/payload-ecommerce-cod/discussions)
 - 📖 [Read the docs](https://github.com/w3panel/payload-ecommerce-cod#readme)

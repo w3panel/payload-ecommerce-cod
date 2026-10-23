@@ -6,12 +6,14 @@ Thank you for your interest in contributing! We welcome contributions from the c
 
 1. Fork the repository
 2. Clone your fork:
+
    ```bash
    git clone https://github.com/YOUR_USERNAME/payload-ecommerce-cod.git
    cd payload-ecommerce-cod
    ```
 
 3. Install dependencies:
+
    ```bash
    npm install
    ```
@@ -97,6 +99,7 @@ We follow conventional commits:
 - `refactor:` Code refactoring
 
 Example:
+
 ```
 feat: add support for dynamic service charges
 

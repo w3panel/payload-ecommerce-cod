@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -62,9 +62,9 @@ jobs:
           release_name: Release ${{ github.ref }}
           body: |
             ## Changes in this Release
-            
+
             See [CHANGELOG.md](https://github.com/w3panel/payload-ecommerce-cod/blob/main/CHANGELOG.md) for details.
-            
+
             ## Installation
             ```bash
             npm install @wtree/payload-ecommerce-cod@${{ github.ref_name }}
