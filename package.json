@@ -54,9 +54,10 @@
   "author": "wtree",
   "license": "MIT",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=24.22.1"
   },
   "devDependencies": {
+    "@payloadcms/plugin-ecommerce": "4.0.0-beta.4",
     "@types/node": "^25.2.1",
     "@typescript-eslint/eslint-plugin": "^8.54.0",
     "@typescript-eslint/parser": "^8.54.0",
@@ -64,6 +65,7 @@
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.0.0",
+    "payload": "4.0.0-beta.4",
     "prettier": "^3.8.1",
     "rolldown": "^1.0.0-rc.3",
     "typescript": "^5.0.0",
@@ -71,8 +73,8 @@
     "vitest": "^4.0.18"
   },
   "peerDependencies": {
-    "payload": "^3.75.0",
-    "@payloadcms/plugin-ecommerce": "^3.75.0"
+    "payload": ">=4.0.0-beta.4 <5",
+    "@payloadcms/plugin-ecommerce": ">=4.0.0-beta.4 <5"
   },
   "dependencies": {}
 }

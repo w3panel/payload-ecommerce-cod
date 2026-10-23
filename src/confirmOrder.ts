@@ -13,9 +13,8 @@ type Props = {
 export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confirmOrder'] =
   (_props) =>
   async ({
-    cartsSlug = 'carts',
     data,
-    ordersSlug = 'orders',
+    finalizeOrder,
     req,
     transactionsSlug = 'transactions',
   }) => {
@@ -32,6 +31,8 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
       // Find our existing transaction by the COD order ID
       const transactionsResults = await payload.find({
         collection: transactionsSlug,
+        overrideAccess: true,
+        req,
         where: {
           'cod.orderID': {
             equals: codOrderID,
@@ -62,47 +63,41 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
       // Get shipping address from billing address or transaction data
       const shippingAddress = transaction.billingAddress
 
-      // Create the order
-      const order = await payload.create({
-        collection: ordersSlug,
-        data: {
+      // finalizeOrder claims the transaction, creates or reuses the order, marks the cart
+      // purchased, and decrements inventory. It also sets the transaction status to succeeded.
+      const order = await finalizeOrder({
+        orderData: {
           amount,
           currency,
           ...(req.user ? { customer: req.user.id } : { customerEmail }),
           items: cartItemsSnapshot,
           shippingAddress,
           status: 'processing',
-          transactions: [transaction.id],
         },
+        transactionID: transaction.id,
       })
 
-      const timestamp = new Date().toISOString()
+      const orderID = order.id
+      if (typeof orderID !== 'string' && typeof orderID !== 'number') {
+        throw new Error('COD order settlement did not return an order')
+      }
 
-      // Update the cart as purchased
-      await payload.update({
-        id: cartID,
-        collection: cartsSlug,
-        data: {
-          purchasedAt: timestamp,
-        },
-      })
-
-      // Link the order; transaction payment status stays pending until cash is collected.
       await payload.update({
         id: transaction.id,
         collection: transactionsSlug,
         data: {
-          order: order.id,
           cod: {
             ...((transaction as Record<string, unknown>).cod || {}),
             validationStatus: 'validated',
           },
         },
+        overrideAccess: true,
+        req,
       })
 
       const returnData: ConfirmOrderReturnType = {
         message: 'COD order confirmed successfully',
-        orderID: order.id as string,
+        orderID: orderID as string,
         transactionID: transaction.id as string,
       }
 

@@ -51,12 +51,14 @@ describe('confirmOrder', () => {
   })
 
   it('should successfully confirm a COD order', async () => {
+    const finalizeOrder = vi.fn().mockResolvedValue({ id: 'order-123' })
     const handler = confirmOrder({})
     const result = await handler({
       data: {
         customerEmail: 'test@example.com',
         orderID: 'COD-123456',
       },
+      finalizeOrder,
       req: mockReq,
       ordersSlug: 'orders',
       cartsSlug: 'carts',
@@ -71,6 +73,8 @@ describe('confirmOrder', () => {
 
     expect(mockPayload.find).toHaveBeenCalledWith({
       collection: 'transactions',
+      overrideAccess: true,
+      req: mockReq,
       where: {
         'cod.orderID': {
           equals: 'COD-123456',
@@ -78,16 +82,17 @@ describe('confirmOrder', () => {
       },
     })
 
-    expect(mockPayload.create).toHaveBeenCalledWith({
-      collection: 'orders',
-      data: expect.objectContaining({
+    expect(finalizeOrder).toHaveBeenCalledWith({
+      orderData: expect.objectContaining({
         amount: 5000,
         currency: 'USD',
+        customer: 'user-123',
         status: 'processing',
       }),
+      transactionID: 'transaction-123',
     })
-
-    expect(mockPayload.update).toHaveBeenCalledTimes(2)
+    expect(mockPayload.create).not.toHaveBeenCalled()
+    expect(mockPayload.update).toHaveBeenCalledTimes(1)
 
     const transactionUpdate = mockPayload.update.mock.calls.find(
       (call) => (call[0] as { collection?: string }).collection === 'transactions',
@@ -95,13 +100,39 @@ describe('confirmOrder', () => {
     expect(transactionUpdate).toBeDefined()
     expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).toEqual(
       expect.objectContaining({
-        order: 'order-123',
         cod: expect.objectContaining({ validationStatus: 'validated' }),
       }),
     )
     expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).not.toHaveProperty(
       'status',
     )
+    expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).not.toHaveProperty(
+      'order',
+    )
+  })
+
+  it('keeps the guest email when nobody is signed in', async () => {
+    const finalizeOrder = vi.fn().mockResolvedValue({ id: 'order-123' })
+    const handler = confirmOrder({})
+    await handler({
+      data: {
+        customerEmail: 'guest@example.com',
+        orderID: 'COD-123456',
+      },
+      finalizeOrder,
+      req: { ...mockReq, user: undefined },
+      ordersSlug: 'orders',
+      cartsSlug: 'carts',
+      transactionsSlug: 'transactions',
+    })
+
+    expect(finalizeOrder).toHaveBeenCalledWith({
+      orderData: expect.objectContaining({
+        customerEmail: 'guest@example.com',
+      }),
+      transactionID: 'transaction-123',
+    })
+    expect(finalizeOrder.mock.calls[0]?.[0].orderData).not.toHaveProperty('customer')
   })
 
   it('should throw error if orderID is missing', async () => {
