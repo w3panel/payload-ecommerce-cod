@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "@wtree/payload-ecommerce-cod",
-  "version": "4.0.0-beta.7",
+  "version": "4.0.0-beta.8",
   "description": "Cash on Delivery (COD) payment adapter for Payload CMS Ecommerce Plugin",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

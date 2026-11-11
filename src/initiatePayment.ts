@@ -118,6 +118,7 @@ export const initiatePayment: (props: Props) => NonNullable<PaymentAdapter>['ini
       // Create a transaction for the COD payment
       const _transaction = await payload.create({
         collection: transactionsSlug,
+        overrideAccess: true,
         data: {
           ...(req.user ? { customer: req.user.id } : { customerEmail }),
           amount: totalAmount,
