@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0-beta.8] - 2026-11-11
+
+### Fixed
+
+- `initiatePayment` creates the COD transaction with `overrideAccess: true`. Payload 4 changed the Local API default to `overrideAccess: false`, so with transactions `create` restricted to admins every customer and guest checkout failed with "You are not allowed to perform this action."
+
+## [4.0.0-beta.7]
+
 ### Changed
 
 - **Breaking behavior:** `confirmOrder` no longer sets the transaction `status` to `succeeded` when the order is created. COD transactions remain `pending` until your application marks payment as collected (for example by updating `cod.paymentCollected` and `status` when cash is received at delivery).
