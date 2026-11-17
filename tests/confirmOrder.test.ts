@@ -3,6 +3,7 @@ import { confirmOrder } from '../src/confirmOrder'
 
 const mockPayload = {
   find: vi.fn(),
+  findByID: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
   logger: {
@@ -103,8 +104,8 @@ describe('confirmOrder', () => {
         cod: expect.objectContaining({ validationStatus: 'validated' }),
       }),
     )
-    expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).not.toHaveProperty(
-      'status',
+    expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).toEqual(
+      expect.objectContaining({ status: 'pending' }),
     )
     expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).not.toHaveProperty(
       'order',
@@ -170,5 +171,110 @@ describe('confirmOrder', () => {
         transactionsSlug: 'transactions',
       }),
     ).rejects.toThrow('No transaction found for the provided COD Order ID')
+  })
+  it('returns the linked order without finalizing again when the checkout is retried', async () => {
+    const finalizeOrder = vi.fn()
+    mockPayload.find.mockResolvedValue({
+      docs: [{ ...mockTransaction, order: 'order-123', status: 'pending' }],
+      totalDocs: 1,
+    })
+    const handler = confirmOrder({})
+    const result = await handler({
+      data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
+      finalizeOrder,
+      req: mockReq,
+      ordersSlug: 'orders',
+      cartsSlug: 'carts',
+      transactionsSlug: 'transactions',
+    })
+
+    expect(result).toEqual({
+      message: 'COD order confirmed successfully',
+      orderID: 'order-123',
+      transactionID: 'transaction-123',
+    })
+    expect(finalizeOrder).not.toHaveBeenCalled()
+    expect(mockPayload.update).not.toHaveBeenCalled()
+  })
+
+  it('accepts a populated order on a retried checkout', async () => {
+    const finalizeOrder = vi.fn()
+    mockPayload.find.mockResolvedValue({
+      docs: [{ ...mockTransaction, order: { id: 42 }, status: 'succeeded' }],
+      totalDocs: 1,
+    })
+    const handler = confirmOrder({})
+    const result = await handler({
+      data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
+      finalizeOrder,
+      req: mockReq,
+      ordersSlug: 'orders',
+      cartsSlug: 'carts',
+      transactionsSlug: 'transactions',
+    })
+
+    expect(result.orderID).toBe(42)
+    expect(finalizeOrder).not.toHaveBeenCalled()
+  })
+
+  it('uses the order a concurrent confirmation created when finalizing times out', async () => {
+    const finalizeOrder = vi
+      .fn()
+      .mockRejectedValue(new Error('Transaction settlement did not complete in time.'))
+    mockPayload.findByID.mockResolvedValue({
+      ...mockTransaction,
+      order: 'order-999',
+      status: 'pending',
+    })
+    const handler = confirmOrder({})
+    const result = await handler({
+      data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
+      finalizeOrder,
+      req: mockReq,
+      ordersSlug: 'orders',
+      cartsSlug: 'carts',
+      transactionsSlug: 'transactions',
+    })
+
+    expect(result.orderID).toBe('order-999')
+    expect(mockPayload.findByID).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'transaction-123', overrideAccess: true }),
+    )
+    expect(mockPayload.update).not.toHaveBeenCalled()
+  })
+
+  it('rethrows a finalize error when no order was created', async () => {
+    const finalizeOrder = vi.fn().mockRejectedValue(new Error('Inventory item could not be updated.'))
+    mockPayload.findByID.mockResolvedValue({ ...mockTransaction, status: 'pending' })
+    const handler = confirmOrder({})
+
+    await expect(
+      handler({
+        data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
+        finalizeOrder,
+        req: mockReq,
+        ordersSlug: 'orders',
+        cartsSlug: 'carts',
+        transactionsSlug: 'transactions',
+      }),
+    ).rejects.toThrow('Inventory item could not be updated.')
+    expect(mockPayload.update).not.toHaveBeenCalled()
+  })
+
+  it('fails when finalizeOrder returns no order id', async () => {
+    const finalizeOrder = vi.fn().mockResolvedValue({})
+    mockPayload.findByID.mockResolvedValue({ ...mockTransaction, status: 'processing' })
+    const handler = confirmOrder({})
+
+    await expect(
+      handler({
+        data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
+        finalizeOrder,
+        req: mockReq,
+        ordersSlug: 'orders',
+        cartsSlug: 'carts',
+        transactionsSlug: 'transactions',
+      }),
+    ).rejects.toThrow('COD order settlement did not return an order')
   })
 })

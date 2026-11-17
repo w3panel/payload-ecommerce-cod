@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0-beta.9] - 2026-11-17
+
+### Fixed
+
+- COD transactions stay `pending` after checkout again, as documented since 4.0.0-beta.7. `confirmOrder` now calls the ecommerce plugin's `finalizeOrder`, which sets every transaction to `succeeded`; the adapter puts the status back to `pending` so a cash order no longer reads as paid before the cash is collected. Your application sets `succeeded` when it records the collection.
+- A repeated confirmation of a finished checkout returns the existing order instead of waiting on `finalizeOrder`, whose wait loop only recognises `succeeded`.
+- If a concurrent confirmation of the same checkout created the order first, the other call returns that order instead of failing with "Transaction settlement did not complete in time."
+
 ## [4.0.0-beta.8] - 2026-11-11
 
 ### Fixed

@@ -1,6 +1,16 @@
 import type { PaymentAdapter } from '@payloadcms/plugin-ecommerce/dist/types'
 import type { ConfirmOrderReturnType } from './index.js'
 
+/** The id of a relationship value (an id, or a populated document), or null when unset. */
+const relationshipID = (value: unknown): number | string | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') return value
+  if (value && typeof value === 'object' && 'id' in value) {
+    return relationshipID((value as { id?: unknown }).id)
+  }
+  return null
+}
+
 type Props = {
   allowedRegions?: string[]
   fixedServiceCharge?: number
@@ -55,26 +65,56 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
         throw new Error('Cart items snapshot not found or invalid in the transaction')
       }
 
+      const confirmed = (orderID: number | string): ConfirmOrderReturnType => ({
+        message: 'COD order confirmed successfully',
+        orderID: orderID as string,
+        transactionID: transaction.id as string,
+      })
+
+      // A repeated confirmation of a finished checkout: the order already exists. Return it
+      // without calling finalizeOrder, whose claim only accepts an unlinked pending
+      // transaction and whose wait loop only recognises `succeeded`.
+      const existingOrderID = relationshipID((transaction as Record<string, unknown>).order)
+      if (existingOrderID !== null) return confirmed(existingOrderID)
+
       // Get shipping address from billing address or transaction data
       const shippingAddress = transaction.billingAddress
 
-      // finalizeOrder claims the transaction, creates or reuses the order, marks the cart
-      // purchased, and decrements inventory. It also sets the transaction status to succeeded.
-      const order = await finalizeOrder({
-        orderData: {
-          amount,
-          currency,
-          ...(req.user ? { customer: req.user.id } : { customerEmail }),
-          items: cartItemsSnapshot,
-          shippingAddress,
-          status: 'processing',
-        },
-        transactionID: transaction.id,
-      })
-
-      const orderID = order.id
-      if (typeof orderID !== 'string' && typeof orderID !== 'number') {
-        throw new Error('COD order settlement did not return an order')
+      // finalizeOrder claims the transaction, creates the order, marks the cart purchased and
+      // decrements inventory. It also sets the transaction status to `succeeded`, which for
+      // COD is wrong: no money has been received yet. The status is put back below.
+      let orderID: number | string
+      try {
+        const order = await finalizeOrder({
+          orderData: {
+            amount,
+            currency,
+            ...(req.user ? { customer: req.user.id } : { customerEmail }),
+            items: cartItemsSnapshot,
+            shippingAddress,
+            status: 'processing',
+          },
+          transactionID: transaction.id,
+        })
+        const id = relationshipID(order?.id)
+        if (id === null) {
+          throw new Error('COD order settlement did not return an order')
+        }
+        orderID = id
+      } catch (error) {
+        // A concurrent confirmation of the same checkout held the claim. Once it finishes, the
+        // transaction is `pending` again with its order linked, which finalizeOrder's wait
+        // loop does not recognise, so it times out. Use the linked order if there is one.
+        const current = await payload.findByID({
+          id: transaction.id,
+          collection: transactionsSlug,
+          depth: 0,
+          overrideAccess: true,
+          req,
+        })
+        const linkedOrderID = relationshipID((current as Record<string, unknown> | null)?.order)
+        if (linkedOrderID === null) throw error
+        return confirmed(linkedOrderID)
       }
 
       await payload.update({
@@ -85,18 +125,15 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
             ...((transaction as Record<string, unknown>).cod || {}),
             validationStatus: 'validated',
           },
+          // Cash is collected at the door, so the transaction stays pending until the
+          // application records the collection (see the README).
+          status: 'pending',
         },
         overrideAccess: true,
         req,
       })
 
-      const returnData: ConfirmOrderReturnType = {
-        message: 'COD order confirmed successfully',
-        orderID: orderID as string,
-        transactionID: transaction.id as string,
-      }
-
-      return returnData
+      return confirmed(orderID)
     } catch (error) {
       payload.logger.error(error, 'Error confirming COD order')
 
