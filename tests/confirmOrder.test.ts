@@ -3,7 +3,7 @@ import { confirmOrder } from '../src/confirmOrder'
 
 const mockPayload = {
   find: vi.fn(),
-  findByID: vi.fn(),
+  db: { updateOne: vi.fn() },
   create: vi.fn(),
   update: vi.fn(),
   logger: {
@@ -172,109 +172,114 @@ describe('confirmOrder', () => {
       }),
     ).rejects.toThrow('No transaction found for the provided COD Order ID')
   })
-  it('returns the linked order without finalizing again when the checkout is retried', async () => {
-    const finalizeOrder = vi.fn()
-    mockPayload.find.mockResolvedValue({
-      docs: [{ ...mockTransaction, order: 'order-123', status: 'pending' }],
-      totalDocs: 1,
-    })
-    const handler = confirmOrder({})
-    const result = await handler({
-      data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
-      finalizeOrder,
-      req: mockReq,
-      ordersSlug: 'orders',
-      cartsSlug: 'carts',
-      transactionsSlug: 'transactions',
-    })
+  describe('with a finalizeOrder that follows the ecommerce plugin', () => {
+    // Mirrors finalizeTransactionOrder / waitForCanonicalOrder in
+    // @payloadcms/plugin-ecommerce: the claim needs an unlinked pending transaction, success
+    // sets `succeeded`, and a linked transaction counts as finished only when `succeeded`.
+    type Row = { order?: string; status: string }
+    let row: Row
+    let ordersCreated: number
 
-    expect(result).toEqual({
-      message: 'COD order confirmed successfully',
-      orderID: 'order-123',
-      transactionID: 'transaction-123',
-    })
-    expect(finalizeOrder).not.toHaveBeenCalled()
-    expect(mockPayload.update).not.toHaveBeenCalled()
-  })
-
-  it('accepts a populated order on a retried checkout', async () => {
-    const finalizeOrder = vi.fn()
-    mockPayload.find.mockResolvedValue({
-      docs: [{ ...mockTransaction, order: { id: 42 }, status: 'succeeded' }],
-      totalDocs: 1,
-    })
-    const handler = confirmOrder({})
-    const result = await handler({
-      data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
-      finalizeOrder,
-      req: mockReq,
-      ordersSlug: 'orders',
-      cartsSlug: 'carts',
-      transactionsSlug: 'transactions',
+    const coreFinalizeOrder = vi.fn(async () => {
+      if (row.status === 'pending' && !row.order) {
+        ordersCreated += 1
+        row.order = `order-${ordersCreated}`
+        row.status = 'succeeded'
+        return { id: row.order }
+      }
+      if (row.status === 'succeeded' && row.order) return { id: row.order }
+      throw new Error('Transaction settlement did not complete in time.')
     })
 
-    expect(result.orderID).toBe(42)
-    expect(finalizeOrder).not.toHaveBeenCalled()
-  })
-
-  it('uses the order a concurrent confirmation created when finalizing times out', async () => {
-    const finalizeOrder = vi
-      .fn()
-      .mockRejectedValue(new Error('Transaction settlement did not complete in time.'))
-    mockPayload.findByID.mockResolvedValue({
-      ...mockTransaction,
-      order: 'order-999',
-      status: 'pending',
-    })
-    const handler = confirmOrder({})
-    const result = await handler({
-      data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
-      finalizeOrder,
-      req: mockReq,
-      ordersSlug: 'orders',
-      cartsSlug: 'carts',
-      transactionsSlug: 'transactions',
-    })
-
-    expect(result.orderID).toBe('order-999')
-    expect(mockPayload.findByID).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'transaction-123', overrideAccess: true }),
-    )
-    expect(mockPayload.update).not.toHaveBeenCalled()
-  })
-
-  it('rethrows a finalize error when no order was created', async () => {
-    const finalizeOrder = vi.fn().mockRejectedValue(new Error('Inventory item could not be updated.'))
-    mockPayload.findByID.mockResolvedValue({ ...mockTransaction, status: 'pending' })
-    const handler = confirmOrder({})
-
-    await expect(
-      handler({
+    const confirm = () =>
+      confirmOrder({})({
         data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
-        finalizeOrder,
+        finalizeOrder: coreFinalizeOrder,
         req: mockReq,
         ordersSlug: 'orders',
         cartsSlug: 'carts',
         transactionsSlug: 'transactions',
-      }),
-    ).rejects.toThrow('Inventory item could not be updated.')
-    expect(mockPayload.update).not.toHaveBeenCalled()
-  })
+      } as any)
 
-  it('fails when finalizeOrder returns no order id', async () => {
-    const finalizeOrder = vi.fn().mockResolvedValue({})
-    mockPayload.findByID.mockResolvedValue({ ...mockTransaction, status: 'processing' })
-    const handler = confirmOrder({})
+    beforeEach(() => {
+      row = { status: 'pending' }
+      ordersCreated = 0
+      coreFinalizeOrder.mockClear()
+      mockPayload.find.mockImplementation(async () => ({
+        docs: [{ ...mockTransaction, ...row }],
+        totalDocs: 1,
+      }))
+      mockPayload.update.mockImplementation(async ({ data }: { data: Partial<Row> }) => {
+        if (data.status) row.status = data.status
+        return {}
+      })
+      mockPayload.db.updateOne.mockImplementation(async ({ data }: { data: Partial<Row> }) => {
+        if (data.status) row.status = data.status
+        return {}
+      })
+    })
 
-    await expect(
-      handler({
-        data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
-        finalizeOrder,
-        req: mockReq,
-        ordersSlug: 'orders',
-        cartsSlug: 'carts',
-        transactionsSlug: 'transactions',
-      }),
-    ).rejects.toThrow('COD order settlement did not return an order')
+    it('leaves a new COD transaction pending with its order linked', async () => {
+      const result = await confirm()
+
+      expect(result.orderID).toBe('order-1')
+      expect(row).toEqual({ order: 'order-1', status: 'pending' })
+      expect(coreFinalizeOrder).toHaveBeenCalledTimes(1)
+    })
+
+    it('confirms a repeated checkout through finalizeOrder without a second order', async () => {
+      await confirm()
+      mockPayload.update.mockClear()
+
+      const again = await confirm()
+
+      expect(again.orderID).toBe('order-1')
+      expect(ordersCreated).toBe(1)
+      expect(coreFinalizeOrder).toHaveBeenCalledTimes(2)
+      expect(row).toEqual({ order: 'order-1', status: 'pending' })
+      // Raw writes only: no hooks, so no payment timeline entries for the repeat.
+      expect(mockPayload.update).not.toHaveBeenCalled()
+      expect(mockPayload.db.updateOne.mock.calls.map((call) => call[0].data.status)).toEqual([
+        'succeeded',
+        'pending',
+      ])
+    })
+
+    it('leaves an older succeeded transaction untouched on a repeat', async () => {
+      row = { order: 'order-7', status: 'succeeded' }
+
+      const result = await confirm()
+
+      expect(result.orderID).toBe('order-7')
+      expect(row).toEqual({ order: 'order-7', status: 'succeeded' })
+      expect(mockPayload.update).not.toHaveBeenCalled()
+      expect(mockPayload.db.updateOne).not.toHaveBeenCalled()
+    })
+
+    it('restores pending when finalizeOrder fails on a repeat', async () => {
+      row = { order: 'order-1', status: 'pending' }
+      coreFinalizeOrder.mockImplementationOnce(async () => {
+        throw new Error('Order settlement did not complete successfully.')
+      })
+
+      await expect(confirm()).rejects.toThrow('Order settlement did not complete successfully.')
+      expect(row.status).toBe('pending')
+    })
+
+    it('rethrows a finalize error on a first confirmation without writing', async () => {
+      coreFinalizeOrder.mockImplementationOnce(async () => {
+        throw new Error('Inventory item could not be updated.')
+      })
+
+      await expect(confirm()).rejects.toThrow('Inventory item could not be updated.')
+      expect(mockPayload.update).not.toHaveBeenCalled()
+      expect(mockPayload.db.updateOne).not.toHaveBeenCalled()
+    })
+
+    it('fails when finalizeOrder returns no order id', async () => {
+      coreFinalizeOrder.mockImplementationOnce(async () => ({}) as never)
+
+      await expect(confirm()).rejects.toThrow('COD order settlement did not return an order')
+    })
   })
 })

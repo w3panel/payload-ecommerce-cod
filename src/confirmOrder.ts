@@ -65,27 +65,33 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
         throw new Error('Cart items snapshot not found or invalid in the transaction')
       }
 
-      const confirmed = (orderID: number | string): ConfirmOrderReturnType => ({
-        message: 'COD order confirmed successfully',
-        orderID: orderID as string,
-        transactionID: transaction.id as string,
-      })
-
-      // A repeated confirmation of a finished checkout: the order already exists. Return it
-      // without calling finalizeOrder, whose claim only accepts an unlinked pending
-      // transaction and whose wait loop only recognises `succeeded`.
-      const existingOrderID = relationshipID((transaction as Record<string, unknown>).order)
-      if (existingOrderID !== null) return confirmed(existingOrderID)
-
       // Get shipping address from billing address or transaction data
       const shippingAddress = transaction.billingAddress
+
+      const record = transaction as Record<string, unknown>
+      const alreadyLinked = relationshipID(record.order) !== null
+      // A repeated confirmation of a checkout this adapter already finished: the order is
+      // linked and the status is back to `pending`. The ecommerce endpoint requires every
+      // confirmation to go through finalizeOrder, whose wait loop only accepts a linked
+      // transaction as finished when it is `succeeded`. Mark it so for the length of this call
+      // with a raw write (no hooks, inside the request's database transaction), then restore.
+      const isRepeatOfPendingCOD = alreadyLinked && record.status === 'pending'
+      const setRawStatus = (status: 'pending' | 'succeeded') =>
+        payload.db.updateOne({
+          id: transaction.id,
+          collection: transactionsSlug,
+          data: { status },
+          req,
+        })
+
+      if (isRepeatOfPendingCOD) await setRawStatus('succeeded')
 
       // finalizeOrder claims the transaction, creates the order, marks the cart purchased and
       // decrements inventory. It also sets the transaction status to `succeeded`, which for
       // COD is wrong: no money has been received yet. The status is put back below.
-      let orderID: number | string
+      let order: Awaited<ReturnType<typeof finalizeOrder>>
       try {
-        const order = await finalizeOrder({
+        order = await finalizeOrder({
           orderData: {
             amount,
             currency,
@@ -96,26 +102,31 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
           },
           transactionID: transaction.id,
         })
-        const id = relationshipID(order?.id)
-        if (id === null) {
-          throw new Error('COD order settlement did not return an order')
-        }
-        orderID = id
       } catch (error) {
-        // A concurrent confirmation of the same checkout held the claim. Once it finishes, the
-        // transaction is `pending` again with its order linked, which finalizeOrder's wait
-        // loop does not recognise, so it times out. Use the linked order if there is one.
-        const current = await payload.findByID({
-          id: transaction.id,
-          collection: transactionsSlug,
-          depth: 0,
-          overrideAccess: true,
-          req,
-        })
-        const linkedOrderID = relationshipID((current as Record<string, unknown> | null)?.order)
-        if (linkedOrderID === null) throw error
-        return confirmed(linkedOrderID)
+        // Without a database transaction (e.g. D1) the temporary status would stay behind.
+        if (isRepeatOfPendingCOD) await setRawStatus('pending').catch(() => undefined)
+        throw error
       }
+
+      const orderID = relationshipID(order?.id)
+      if (orderID === null) {
+        throw new Error('COD order settlement did not return an order')
+      }
+
+      const confirmed: ConfirmOrderReturnType = {
+        message: 'COD order confirmed successfully',
+        orderID: orderID as string,
+        transactionID: transaction.id as string,
+      }
+
+      if (isRepeatOfPendingCOD) {
+        await setRawStatus('pending')
+        return confirmed
+      }
+
+      // Already linked and not pending: a transaction from before 4.0.0-beta.9, or one the
+      // application has since marked collected. Leave it exactly as it is.
+      if (alreadyLinked) return confirmed
 
       await payload.update({
         id: transaction.id,
@@ -133,7 +144,7 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
         req,
       })
 
-      return confirmed(orderID)
+      return confirmed
     } catch (error) {
       payload.logger.error(error, 'Error confirming COD order')
 
