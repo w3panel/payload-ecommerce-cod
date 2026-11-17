@@ -176,7 +176,7 @@ describe('confirmOrder', () => {
     // Mirrors finalizeTransactionOrder / waitForCanonicalOrder in
     // @payloadcms/plugin-ecommerce: the claim needs an unlinked pending transaction, success
     // sets `succeeded`, and a linked transaction counts as finished only when `succeeded`.
-    type Row = { order?: string; status: string }
+    type Row = { collected?: boolean; order?: string; status: string }
     let row: Row
     let ordersCreated: number
 
@@ -191,11 +191,14 @@ describe('confirmOrder', () => {
       throw new Error('Transaction settlement did not complete in time.')
     })
 
-    const confirm = () =>
+    // Inside a database transaction, as on Postgres.
+    const txReq = { ...mockReq, transactionID: 'db-tx-1' }
+
+    const confirm = (req: unknown = txReq) =>
       confirmOrder({})({
         data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
         finalizeOrder: coreFinalizeOrder,
-        req: mockReq,
+        req,
         ordersSlug: 'orders',
         cartsSlug: 'carts',
         transactionsSlug: 'transactions',
@@ -213,10 +216,14 @@ describe('confirmOrder', () => {
         if (data.status) row.status = data.status
         return {}
       })
-      mockPayload.db.updateOne.mockImplementation(async ({ data }: { data: Partial<Row> }) => {
-        if (data.status) row.status = data.status
-        return {}
-      })
+      mockPayload.db.updateOne.mockImplementation(
+        async ({ data, where }: { data: Partial<Row>; where?: unknown }) => {
+          // The conditional restore: only a succeeded row whose cash is not collected.
+          if (where && (row.status !== 'succeeded' || row.collected === true)) return null
+          if (data.status) row.status = data.status
+          return {}
+        },
+      )
     })
 
     it('leaves a new COD transaction pending with its order linked', async () => {
@@ -264,6 +271,31 @@ describe('confirmOrder', () => {
 
       await expect(confirm()).rejects.toThrow('Order settlement did not complete successfully.')
       expect(row.status).toBe('pending')
+    })
+
+    it('keeps a cash collection recorded while a repeat was running', async () => {
+      row = { order: 'order-1', status: 'pending' }
+      coreFinalizeOrder.mockImplementationOnce(async () => {
+        // The application records the collection during the call.
+        row.collected = true
+        row.status = 'succeeded'
+        return { id: 'order-1' }
+      })
+
+      const result = await confirm()
+
+      expect(result.orderID).toBe('order-1')
+      expect(row).toEqual({ collected: true, order: 'order-1', status: 'succeeded' })
+    })
+
+    it('does not mark a repeat succeeded without a database transaction', async () => {
+      row = { order: 'order-1', status: 'pending' }
+
+      await expect(confirm({ ...mockReq, transactionID: undefined })).rejects.toThrow(
+        'Transaction settlement did not complete in time.',
+      )
+      expect(mockPayload.db.updateOne).not.toHaveBeenCalled()
+      expect(row).toEqual({ order: 'order-1', status: 'pending' })
     })
 
     it('rethrows a finalize error on a first confirmation without writing', async () => {

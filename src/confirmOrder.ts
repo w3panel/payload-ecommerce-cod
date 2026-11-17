@@ -75,16 +75,42 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
       // confirmation to go through finalizeOrder, whose wait loop only accepts a linked
       // transaction as finished when it is `succeeded`. Mark it so for the length of this call
       // with a raw write (no hooks, inside the request's database transaction), then restore.
-      const isRepeatOfPendingCOD = alreadyLinked && record.status === 'pending'
-      const setRawStatus = (status: 'pending' | 'succeeded') =>
+      // Only inside a database transaction (e.g. Postgres): there the temporary status is never
+      // visible to other requests and is rolled back if anything fails. Without one (e.g. D1)
+      // a repeat is left to finalizeOrder, which then times out, rather than briefly showing
+      // an unpaid order as paid.
+      const inDatabaseTransaction = Boolean(await req.transactionID)
+      const isRepeatOfPendingCOD =
+        alreadyLinked && record.status === 'pending' && inDatabaseTransaction
+      const markSucceeded = () =>
         payload.db.updateOne({
           id: transaction.id,
           collection: transactionsSlug,
-          data: { status },
+          data: { status: 'succeeded' },
           req,
         })
+      // Restore only what this call changed: if the application recorded the cash collection
+      // meanwhile (which sets `succeeded` with `cod.paymentCollected`), keep it.
+      const restorePending = () =>
+        payload.db.updateOne({
+          collection: transactionsSlug,
+          data: { status: 'pending' },
+          req,
+          where: {
+            and: [
+              { id: { equals: transaction.id } },
+              { status: { equals: 'succeeded' } },
+              {
+                or: [
+                  { 'cod.paymentCollected': { equals: false } },
+                  { 'cod.paymentCollected': { exists: false } },
+                ],
+              },
+            ],
+          },
+        })
 
-      if (isRepeatOfPendingCOD) await setRawStatus('succeeded')
+      if (isRepeatOfPendingCOD) await markSucceeded()
 
       // finalizeOrder claims the transaction, creates the order, marks the cart purchased and
       // decrements inventory. It also sets the transaction status to `succeeded`, which for
@@ -104,7 +130,7 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
         })
       } catch (error) {
         // Without a database transaction (e.g. D1) the temporary status would stay behind.
-        if (isRepeatOfPendingCOD) await setRawStatus('pending').catch(() => undefined)
+        if (isRepeatOfPendingCOD) await restorePending().catch(() => undefined)
         throw error
       }
 
@@ -120,7 +146,7 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
       }
 
       if (isRepeatOfPendingCOD) {
-        await setRawStatus('pending')
+        await restorePending()
         return confirmed
       }
 
