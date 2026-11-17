@@ -1,6 +1,16 @@
 import type { PaymentAdapter } from '@payloadcms/plugin-ecommerce/dist/types'
 import type { ConfirmOrderReturnType } from './index.js'
 
+/** The id of a relationship value (an id, or a populated document), or null when unset. */
+const relationshipID = (value: unknown): number | string | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim() !== '') return value
+  if (value && typeof value === 'object' && 'id' in value) {
+    return relationshipID((value as { id?: unknown }).id)
+  }
+  return null
+}
+
 type Props = {
   allowedRegions?: string[]
   fixedServiceCharge?: number
@@ -58,24 +68,91 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
       // Get shipping address from billing address or transaction data
       const shippingAddress = transaction.billingAddress
 
-      // finalizeOrder claims the transaction, creates or reuses the order, marks the cart
-      // purchased, and decrements inventory. It also sets the transaction status to succeeded.
-      const order = await finalizeOrder({
-        orderData: {
-          amount,
-          currency,
-          ...(req.user ? { customer: req.user.id } : { customerEmail }),
-          items: cartItemsSnapshot,
-          shippingAddress,
-          status: 'processing',
-        },
-        transactionID: transaction.id,
-      })
+      const record = transaction as Record<string, unknown>
+      const alreadyLinked = relationshipID(record.order) !== null
+      // A repeated confirmation of a checkout this adapter already finished: the order is
+      // linked and the status is back to `pending`. The ecommerce endpoint requires every
+      // confirmation to go through finalizeOrder, whose wait loop only accepts a linked
+      // transaction as finished when it is `succeeded`. Mark it so for the length of this call
+      // with a raw write (no hooks, inside the request's database transaction), then restore.
+      // Only inside a database transaction (e.g. Postgres): there the temporary status is never
+      // visible to other requests and is rolled back if anything fails. Without one (e.g. D1)
+      // a repeat is left to finalizeOrder, which then times out, rather than briefly showing
+      // an unpaid order as paid.
+      const inDatabaseTransaction = Boolean(await req.transactionID)
+      const isRepeatOfPendingCOD =
+        alreadyLinked && record.status === 'pending' && inDatabaseTransaction
+      const markSucceeded = () =>
+        payload.db.updateOne({
+          id: transaction.id,
+          collection: transactionsSlug,
+          data: { status: 'succeeded' },
+          req,
+        })
+      // Restore only what this call changed: if the application recorded the cash collection
+      // meanwhile (which sets `succeeded` with `cod.paymentCollected`), keep it.
+      const restorePending = () =>
+        payload.db.updateOne({
+          collection: transactionsSlug,
+          data: { status: 'pending' },
+          req,
+          where: {
+            and: [
+              { id: { equals: transaction.id } },
+              { status: { equals: 'succeeded' } },
+              {
+                or: [
+                  { 'cod.paymentCollected': { equals: false } },
+                  { 'cod.paymentCollected': { exists: false } },
+                ],
+              },
+            ],
+          },
+        })
 
-      const orderID = order.id
-      if (typeof orderID !== 'string' && typeof orderID !== 'number') {
+      if (isRepeatOfPendingCOD) await markSucceeded()
+
+      // finalizeOrder claims the transaction, creates the order, marks the cart purchased and
+      // decrements inventory. It also sets the transaction status to `succeeded`, which for
+      // COD is wrong: no money has been received yet. The status is put back below.
+      let order: Awaited<ReturnType<typeof finalizeOrder>>
+      try {
+        order = await finalizeOrder({
+          orderData: {
+            amount,
+            currency,
+            ...(req.user ? { customer: req.user.id } : { customerEmail }),
+            items: cartItemsSnapshot,
+            shippingAddress,
+            status: 'processing',
+          },
+          transactionID: transaction.id,
+        })
+      } catch (error) {
+        // Without a database transaction (e.g. D1) the temporary status would stay behind.
+        if (isRepeatOfPendingCOD) await restorePending().catch(() => undefined)
+        throw error
+      }
+
+      const orderID = relationshipID(order?.id)
+      if (orderID === null) {
         throw new Error('COD order settlement did not return an order')
       }
+
+      const confirmed: ConfirmOrderReturnType = {
+        message: 'COD order confirmed successfully',
+        orderID: orderID as string,
+        transactionID: transaction.id as string,
+      }
+
+      if (isRepeatOfPendingCOD) {
+        await restorePending()
+        return confirmed
+      }
+
+      // Already linked and not pending: a transaction from before 4.0.0-beta.9, or one the
+      // application has since marked collected. Leave it exactly as it is.
+      if (alreadyLinked) return confirmed
 
       await payload.update({
         id: transaction.id,
@@ -85,18 +162,15 @@ export const confirmOrder: (props: Props) => NonNullable<PaymentAdapter>['confir
             ...((transaction as Record<string, unknown>).cod || {}),
             validationStatus: 'validated',
           },
+          // Cash is collected at the door, so the transaction stays pending until the
+          // application records the collection (see the README).
+          status: 'pending',
         },
         overrideAccess: true,
         req,
       })
 
-      const returnData: ConfirmOrderReturnType = {
-        message: 'COD order confirmed successfully',
-        orderID: orderID as string,
-        transactionID: transaction.id as string,
-      }
-
-      return returnData
+      return confirmed
     } catch (error) {
       payload.logger.error(error, 'Error confirming COD order')
 

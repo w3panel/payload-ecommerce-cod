@@ -3,6 +3,7 @@ import { confirmOrder } from '../src/confirmOrder'
 
 const mockPayload = {
   find: vi.fn(),
+  db: { updateOne: vi.fn() },
   create: vi.fn(),
   update: vi.fn(),
   logger: {
@@ -103,8 +104,8 @@ describe('confirmOrder', () => {
         cod: expect.objectContaining({ validationStatus: 'validated' }),
       }),
     )
-    expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).not.toHaveProperty(
-      'status',
+    expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).toEqual(
+      expect.objectContaining({ status: 'pending' }),
     )
     expect((transactionUpdate![0] as { data?: Record<string, unknown> }).data).not.toHaveProperty(
       'order',
@@ -170,5 +171,147 @@ describe('confirmOrder', () => {
         transactionsSlug: 'transactions',
       }),
     ).rejects.toThrow('No transaction found for the provided COD Order ID')
+  })
+  describe('with a finalizeOrder that follows the ecommerce plugin', () => {
+    // Mirrors finalizeTransactionOrder / waitForCanonicalOrder in
+    // @payloadcms/plugin-ecommerce: the claim needs an unlinked pending transaction, success
+    // sets `succeeded`, and a linked transaction counts as finished only when `succeeded`.
+    type Row = { collected?: boolean; order?: string; status: string }
+    let row: Row
+    let ordersCreated: number
+
+    const coreFinalizeOrder = vi.fn(async () => {
+      if (row.status === 'pending' && !row.order) {
+        ordersCreated += 1
+        row.order = `order-${ordersCreated}`
+        row.status = 'succeeded'
+        return { id: row.order }
+      }
+      if (row.status === 'succeeded' && row.order) return { id: row.order }
+      throw new Error('Transaction settlement did not complete in time.')
+    })
+
+    // Inside a database transaction, as on Postgres.
+    const txReq = { ...mockReq, transactionID: 'db-tx-1' }
+
+    const confirm = (req: unknown = txReq) =>
+      confirmOrder({})({
+        data: { customerEmail: 'test@example.com', orderID: 'COD-123456' },
+        finalizeOrder: coreFinalizeOrder,
+        req,
+        ordersSlug: 'orders',
+        cartsSlug: 'carts',
+        transactionsSlug: 'transactions',
+      } as any)
+
+    beforeEach(() => {
+      row = { status: 'pending' }
+      ordersCreated = 0
+      coreFinalizeOrder.mockClear()
+      mockPayload.find.mockImplementation(async () => ({
+        docs: [{ ...mockTransaction, ...row }],
+        totalDocs: 1,
+      }))
+      mockPayload.update.mockImplementation(async ({ data }: { data: Partial<Row> }) => {
+        if (data.status) row.status = data.status
+        return {}
+      })
+      mockPayload.db.updateOne.mockImplementation(
+        async ({ data, where }: { data: Partial<Row>; where?: unknown }) => {
+          // The conditional restore: only a succeeded row whose cash is not collected.
+          if (where && (row.status !== 'succeeded' || row.collected === true)) return null
+          if (data.status) row.status = data.status
+          return {}
+        },
+      )
+    })
+
+    it('leaves a new COD transaction pending with its order linked', async () => {
+      const result = await confirm()
+
+      expect(result.orderID).toBe('order-1')
+      expect(row).toEqual({ order: 'order-1', status: 'pending' })
+      expect(coreFinalizeOrder).toHaveBeenCalledTimes(1)
+    })
+
+    it('confirms a repeated checkout through finalizeOrder without a second order', async () => {
+      await confirm()
+      mockPayload.update.mockClear()
+
+      const again = await confirm()
+
+      expect(again.orderID).toBe('order-1')
+      expect(ordersCreated).toBe(1)
+      expect(coreFinalizeOrder).toHaveBeenCalledTimes(2)
+      expect(row).toEqual({ order: 'order-1', status: 'pending' })
+      // Raw writes only: no hooks, so no payment timeline entries for the repeat.
+      expect(mockPayload.update).not.toHaveBeenCalled()
+      expect(mockPayload.db.updateOne.mock.calls.map((call) => call[0].data.status)).toEqual([
+        'succeeded',
+        'pending',
+      ])
+    })
+
+    it('leaves an older succeeded transaction untouched on a repeat', async () => {
+      row = { order: 'order-7', status: 'succeeded' }
+
+      const result = await confirm()
+
+      expect(result.orderID).toBe('order-7')
+      expect(row).toEqual({ order: 'order-7', status: 'succeeded' })
+      expect(mockPayload.update).not.toHaveBeenCalled()
+      expect(mockPayload.db.updateOne).not.toHaveBeenCalled()
+    })
+
+    it('restores pending when finalizeOrder fails on a repeat', async () => {
+      row = { order: 'order-1', status: 'pending' }
+      coreFinalizeOrder.mockImplementationOnce(async () => {
+        throw new Error('Order settlement did not complete successfully.')
+      })
+
+      await expect(confirm()).rejects.toThrow('Order settlement did not complete successfully.')
+      expect(row.status).toBe('pending')
+    })
+
+    it('keeps a cash collection recorded while a repeat was running', async () => {
+      row = { order: 'order-1', status: 'pending' }
+      coreFinalizeOrder.mockImplementationOnce(async () => {
+        // The application records the collection during the call.
+        row.collected = true
+        row.status = 'succeeded'
+        return { id: 'order-1' }
+      })
+
+      const result = await confirm()
+
+      expect(result.orderID).toBe('order-1')
+      expect(row).toEqual({ collected: true, order: 'order-1', status: 'succeeded' })
+    })
+
+    it('does not mark a repeat succeeded without a database transaction', async () => {
+      row = { order: 'order-1', status: 'pending' }
+
+      await expect(confirm({ ...mockReq, transactionID: undefined })).rejects.toThrow(
+        'Transaction settlement did not complete in time.',
+      )
+      expect(mockPayload.db.updateOne).not.toHaveBeenCalled()
+      expect(row).toEqual({ order: 'order-1', status: 'pending' })
+    })
+
+    it('rethrows a finalize error on a first confirmation without writing', async () => {
+      coreFinalizeOrder.mockImplementationOnce(async () => {
+        throw new Error('Inventory item could not be updated.')
+      })
+
+      await expect(confirm()).rejects.toThrow('Inventory item could not be updated.')
+      expect(mockPayload.update).not.toHaveBeenCalled()
+      expect(mockPayload.db.updateOne).not.toHaveBeenCalled()
+    })
+
+    it('fails when finalizeOrder returns no order id', async () => {
+      coreFinalizeOrder.mockImplementationOnce(async () => ({}) as never)
+
+      await expect(confirm()).rejects.toThrow('COD order settlement did not return an order')
+    })
   })
 })
