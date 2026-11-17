@@ -48,8 +48,22 @@ jobs:
       - name: Verify package contents
         run: npm pack --dry-run
 
+      - name: Check tag and choose dist-tag
+        id: dist
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package.json version ${version}" >&2
+            exit 1
+          fi
+          # A prerelease (1.2.3-beta.4) must not become `latest`.
+          case "${version}" in
+            *-*) echo "tag=next" >> "$GITHUB_OUTPUT"; echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "tag=latest" >> "$GITHUB_OUTPUT"; echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
       - name: Publish to NPM
-        run: npm publish --provenance --access public
+        run: npm publish --provenance --access public --tag "${{ steps.dist.outputs.tag }}"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -70,4 +84,4 @@ jobs:
             npm install @wtree/payload-ecommerce-cod@${{ github.ref_name }}
             ```
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.dist.outputs.prerelease == 'true' }}
